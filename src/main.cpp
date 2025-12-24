@@ -1,41 +1,83 @@
-#include <iostream>
-#include <cstring>
 #include "net/Socket.h"
+#include "protocol/Message.h"
+
+#include <iostream>
+#include <thread>
+#include <string>
+#include <cstring>
+
+void receiveLoop(Socket* sock) {
+    std::string msg;
+    while (recvMessage(sock, msg)) {
+        std::cout << "\n" << msg << std::endl;
+    }
+    std::cout << "Peer disconnected\n";
+}
+
+std::string getArg(int argc, char* argv[], const std::string& key) {
+    for (int i = 1; i < argc - 1; i++) {
+        if (argv[i] == key)
+            return argv[i + 1];
+    }
+    return "";
+}
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "Usage: ./p2p_chat server|client\n";
+    std::string name = getArg(argc, argv, "--name");
+    std::string portStr = getArg(argc, argv, "--port");
+    std::string connectStr = getArg(argc, argv, "--connect");
+
+    if (name.empty() || portStr.empty()) {
+        std::cerr << "Usage: ./p2p_chat --name NAME --port PORT [--connect IP:PORT]\n";
         return 1;
     }
 
-    std::string mode = argv[1];
+    int port = std::stoi(portStr);
 
-    if (mode == "server") {
-        Socket server;
-        server.create();
-        server.bind(5555);
-        server.listen();
+    Socket server;
+    server.create();
+    server.bind(port);
+    server.listen();
 
-        std::cout << "Server waiting...\n";
-        Socket* client = server.accept();
+    std::cout << "[" << name << "] Listening on port " << port << "...\n";
 
-        char buffer[128] = {};
-        client->recv(buffer, sizeof(buffer));
-        std::cout << "Server received: " << buffer << std::endl;
+    std::thread acceptThread([&]() {
+        while (true) {
+            Socket* peer = server.accept();
+            if (!peer) continue;
 
-        delete client;
+            std::cout << "\n[" << name << "] Incoming connection\n";
+            std::thread(receiveLoop, peer).detach();
+        }
+    });
+
+    Socket* outbound = nullptr;
+
+    if (!connectStr.empty()) {
+        auto pos = connectStr.find(':');
+        std::string ip = connectStr.substr(0, pos);
+        int peerPort = std::stoi(connectStr.substr(pos + 1));
+
+        outbound = new Socket();
+        outbound->create();
+
+        if (outbound->connect(ip, peerPort)) {
+            std::cout << "[" << name << "] Connected to " << connectStr << "\n";
+            std::thread(receiveLoop, outbound).detach();
+        } else {
+            std::cerr << "Connection failed\n";
+            delete outbound;
+            outbound = nullptr;
+        }
     }
-    else if (mode == "client") {
-        Socket client;
-        client.create();
-        client.connect("127.0.0.1", 5555);
 
-        const char* msg = "Hello from client";
-        client.send(msg, strlen(msg));
-    }
-    else {
-        std::cerr << "Invalid mode\n";
+    std::string input;
+    while (std::getline(std::cin, input)) {
+        std::string fullMsg = "[" + name + "] " + input;
+        if (outbound)
+            sendMessage(outbound, fullMsg);
     }
 
+    acceptThread.join();
     return 0;
 }
