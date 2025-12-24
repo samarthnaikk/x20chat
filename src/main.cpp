@@ -1,18 +1,12 @@
 #include "net/Socket.h"
+#include "net/UdpSocket.h"
 #include "protocol/Message.h"
 
 #include <iostream>
 #include <thread>
 #include <string>
-#include <cstring>
-
-void receiveLoop(Socket* sock) {
-    std::string msg;
-    while (recvMessage(sock, msg)) {
-        std::cout << "\n" << msg << std::endl;
-    }
-    std::cout << "Peer disconnected\n";
-}
+#include <sstream>
+#include <atomic>
 
 std::string getArg(int argc, char* argv[], const std::string& key) {
     for (int i = 1; i < argc - 1; i++) {
@@ -22,62 +16,94 @@ std::string getArg(int argc, char* argv[], const std::string& key) {
     return "";
 }
 
+bool parseIpPort(const std::string& s, std::string& ip, unsigned short& port) {
+    auto pos = s.find(':');
+    if (pos == std::string::npos) return false;
+    ip = s.substr(0, pos);
+    port = static_cast<unsigned short>(std::stoi(s.substr(pos + 1)));
+    return true;
+}
+
 int main(int argc, char* argv[]) {
     std::string name = getArg(argc, argv, "--name");
-    std::string portStr = getArg(argc, argv, "--port");
-    std::string connectStr = getArg(argc, argv, "--connect");
+    std::string room = getArg(argc, argv, "--room");
+    std::string rendezvousStr = getArg(argc, argv, "--rendezvous");
 
-    if (name.empty() || portStr.empty()) {
-        std::cerr << "Usage: ./p2p_chat --name NAME --port PORT [--connect IP:PORT]\n";
+    if (name.empty() || room.empty() || rendezvousStr.empty()) {
+        std::cerr << "Usage: --name NAME --room ROOM --rendezvous IP:PORT\n";
         return 1;
     }
 
-    int port = std::stoi(portStr);
+    // ---------------- UDP socket ----------------
+    UdpSocket udp;
+    udp.open(0);
 
-    Socket server;
-    server.create();
-    server.bind(port);
-    server.listen();
+    std::string rvIp;
+    unsigned short rvPort;
+    parseIpPort(rendezvousStr, rvIp, rvPort);
 
-    std::cout << "[" << name << "] Listening on port " << port << "...\n";
+    std::string reg = "REGISTER " + name + " " + room;
+    udp.sendTo(rvIp, rvPort, reg);
 
-    std::thread acceptThread([&]() {
+    std::cout << "[" << name << "] Registered with rendezvous\n";
+
+    std::atomic<bool> peerKnown(false);
+    std::string peerIp;
+    unsigned short peerPort = 0;
+
+    // ---------------- UDP receive thread ----------------
+    std::thread recvThread([&]() {
         while (true) {
-            Socket* peer = server.accept();
-            if (!peer) continue;
+            std::string msg, ip;
+            unsigned short port;
 
-            std::cout << "\n[" << name << "] Incoming connection\n";
-            std::thread(receiveLoop, peer).detach();
+            if (!udp.recvFrom(msg, ip, port))
+                continue;
+
+            if (msg.rfind("PEER ", 0) == 0) {
+                std::istringstream iss(msg);
+                std::string type, peerName;
+                iss >> type >> peerName >> peerIp >> peerPort;
+
+                peerKnown = true;
+
+                std::cout << "\n[" << name << "] Discovered peer "
+                          << peerName << " at "
+                          << peerIp << ":" << peerPort << "\n";
+
+                // ---- HOLE PUNCH ----
+                for (int i = 0; i < 5; i++) {
+                    udp.sendTo(peerIp, peerPort, "PING");
+                }
+            }
+            else if (msg == "PING") {
+                if (!peerKnown) {
+                    peerIp = ip;
+                    peerPort = port;
+                    peerKnown = true;
+                }
+                udp.sendTo(ip, port, "PONG");
+            }
+            else if (msg == "PONG") {
+                std::cout << "\n[" << name << "] UDP hole punching successful\n";
+            }
+            else {
+                std::cout << "\n[" << name << "] " << msg << std::endl;
+            }
         }
     });
 
-    Socket* outbound = nullptr;
-
-    if (!connectStr.empty()) {
-        auto pos = connectStr.find(':');
-        std::string ip = connectStr.substr(0, pos);
-        int peerPort = std::stoi(connectStr.substr(pos + 1));
-
-        outbound = new Socket();
-        outbound->create();
-
-        if (outbound->connect(ip, peerPort)) {
-            std::cout << "[" << name << "] Connected to " << connectStr << "\n";
-            std::thread(receiveLoop, outbound).detach();
+    // ---------------- input loop ----------------
+    std::string input;
+    while (std::getline(std::cin, input)) {
+        if (peerKnown) {
+            std::string chat = "[" + name + "] " + input;
+            udp.sendTo(peerIp, peerPort, chat);
         } else {
-            std::cerr << "Connection failed\n";
-            delete outbound;
-            outbound = nullptr;
+            std::cout << "[waiting for peer...]\n";
         }
     }
 
-    std::string input;
-    while (std::getline(std::cin, input)) {
-        std::string fullMsg = "[" + name + "] " + input;
-        if (outbound)
-            sendMessage(outbound, fullMsg);
-    }
-
-    acceptThread.join();
+    recvThread.join();
     return 0;
 }
