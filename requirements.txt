@@ -1,0 +1,10 @@
+# Python Dependencies for x20chat
+#
+# This file lists all Python packages required by the x20chat application.
+# Currently empty as no dependencies have been added yet.
+#
+# To install dependencies (when added):
+#   pip install -r requirements.txt
+#
+# To generate this file from your environment:
+#   pip freeze > requirements.txt
