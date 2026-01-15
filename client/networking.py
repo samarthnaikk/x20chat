@@ -12,21 +12,29 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Constants
+DEFAULT_SOCKET_TIMEOUT = 1.0  # seconds
+DEFAULT_HEARTBEAT_INTERVAL = 15  # seconds
+
 
 class UDPSocket:
     """UDP socket wrapper with NAT traversal support"""
     
-    def __init__(self, port: int = 0):
+    def __init__(self, port: int = 0, timeout: float = DEFAULT_SOCKET_TIMEOUT):
         """
         Initialize UDP socket.
         
         Args:
             port: Local port to bind (0 for random available port)
+            timeout: Socket timeout in seconds for receive operations
         """
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Intentionally bind to all interfaces (0.0.0.0) for P2P communication
+        # This is required to accept UDP packets from any network for NAT traversal
         self.socket.bind(('0.0.0.0', port))
         self.local_port = self.socket.getsockname()[1]
+        self.timeout = timeout
         self.running = False
         self.recv_thread = None
         self.on_message_callback = None
@@ -66,7 +74,7 @@ class UDPSocket:
     
     def _receive_loop(self):
         """Background thread for receiving messages"""
-        self.socket.settimeout(1.0)
+        self.socket.settimeout(self.timeout)
         
         while self.running:
             try:
@@ -117,14 +125,16 @@ class NATTraversal:
 class Heartbeat:
     """Keep-alive heartbeat to maintain NAT mapping"""
     
-    def __init__(self, udp_socket: UDPSocket, peer_address: Tuple[str, int], interval: int = 15):
+    def __init__(self, udp_socket: UDPSocket, peer_address: Tuple[str, int], interval: int = DEFAULT_HEARTBEAT_INTERVAL):
         """
         Initialize heartbeat.
         
         Args:
             udp_socket: UDP socket to use
             peer_address: Peer's (ip, port) tuple
-            interval: Heartbeat interval in seconds
+            interval: Heartbeat interval in seconds (default: 15s, chosen to prevent
+                     NAT mapping expiration which typically occurs after 30-60 seconds
+                     of inactivity)
         """
         self.udp_socket = udp_socket
         self.peer_address = peer_address

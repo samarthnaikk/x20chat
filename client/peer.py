@@ -17,29 +17,35 @@ from networking import UDPSocket, NATTraversal, Heartbeat
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Constants
+PEER_ID_DISPLAY_LENGTH = 8
+DEFAULT_RETRY_COUNT = 3
+DEFAULT_HEARTBEAT_INTERVAL = 15  # seconds
+
 
 class Peer:
     """P2P Chat Peer"""
     
-    def __init__(self, username: str = None, signaling_server: str = "http://localhost:8000"):
+    def __init__(self, username: str = None, signaling_server: str = "http://localhost:8000", retry_count: int = DEFAULT_RETRY_COUNT):
         """
         Initialize peer.
         
         Args:
             username: Optional username (generated if not provided)
             signaling_server: Signaling server URL
+            retry_count: Number of retry attempts for network operations
         """
         self.peer_id = str(uuid.uuid4())
-        self.username = username if username else f"user_{self.peer_id[:8]}"
+        self.username = username if username else f"user_{self.peer_id[:PEER_ID_DISPLAY_LENGTH]}"
         self.signaling_server = signaling_server
         self.udp_socket = UDPSocket()
         self.peer_address = None
         self.peer_id_remote = None
         self.connected = False
         self.heartbeat = None
-        self.retry_count = 3
+        self.retry_count = retry_count
         
-        logger.info(f"Peer initialized: {self.username} (ID: {self.peer_id[:8]}...)")
+        logger.info(f"Peer initialized: {self.username} (ID: {self.peer_id[:PEER_ID_DISPLAY_LENGTH]}...)")
     
     def register_with_server(self) -> bool:
         """
@@ -85,7 +91,7 @@ class Peer:
         Returns:
             Tuple of (ip, port) or None if not found
         """
-        logger.info(f"Discovering peer: {target_peer_id[:8]}...")
+        logger.info(f"Discovering peer: {target_peer_id[:PEER_ID_DISPLAY_LENGTH]}...")
         
         for attempt in range(self.retry_count):
             try:
@@ -102,7 +108,7 @@ class Peer:
                     logger.info(f"Peer discovered at {peer_ip}:{peer_port}")
                     return (peer_ip, peer_port)
                 elif response.status_code == 404:
-                    logger.warning(f"Peer not found: {target_peer_id[:8]}...")
+                    logger.warning(f"Peer not found: {target_peer_id[:PEER_ID_DISPLAY_LENGTH]}...")
                     return None
                 else:
                     logger.warning(f"Discovery failed: {response.status_code}")
@@ -197,7 +203,7 @@ class Peer:
                 self.send_message(pong)
                 
             elif message.type == MessageType.MESSAGE:
-                print(f"\n[{message.from_peer[:8]}...]: {message.body}")
+                print(f"\n[{message.from_peer[:PEER_ID_DISPLAY_LENGTH]}...]: {message.body}")
                 print("> ", end="", flush=True)
                 
             elif message.type == MessageType.PING:

@@ -192,6 +192,8 @@ if __name__ == "__main__":
     import uvicorn
     
     logger.info("Starting P2P Chat Signaling Server...")
+    # Bind to all interfaces (0.0.0.0) to allow connections from any network
+    # This is intentional for a signaling server that needs to be publicly accessible
     logger.info("Server will listen on http://0.0.0.0:8000")
     
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
