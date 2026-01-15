@@ -184,6 +184,14 @@ class Peer:
             
             if message.type == MessageType.HELLO:
                 logger.info(f"Received HELLO from peer")
+                # Update peer address and mark as connected
+                if not self.connected:
+                    self.peer_address = address
+                    self.connected = True
+                    # Start heartbeat for this peer too
+                    if not self.heartbeat:
+                        self.heartbeat = Heartbeat(self.udp_socket, address)
+                        self.heartbeat.start()
                 # Send PONG response
                 pong = create_pong_message(self.peer_id)
                 self.send_message(pong)

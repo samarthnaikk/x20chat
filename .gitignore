@@ -169,3 +169,7 @@ pip-delete-this-directory.txt
 htmlcov/
 dist/
 *.egg-info/
+
+# Test and demo scripts (optional)
+test_mvp.py
+demo_mvp.py
